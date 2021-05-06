@@ -1,0 +1,594 @@
+---
+title: "Predicting heart disease"
+author: "Mike Miemczok"
+date: "5 5 2021"
+output: pdf_document
+---
+
+```{r, message = FALSE, echo=FALSE, warning=FALSE}
+
+############ Do your own project - Capstone - Predicting Heart disease. ##########################
+
+# Installing packages and loading libraries.
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(lubridate)) install.packages("lubridate", repos = "http://cran.us.r-project.org")
+if(!require(corrplot)) install.packages("corrplot", repos = "http://cran.us.r-project.org")
+if(!require(naniar)) install.packages("naniar", repos = "http://cran.us.r-project.org")
+if(!require(rpart)) install.packages("rpart", repos = "http://cran.us.r-project.org")
+
+library(caret)
+library(rpart)
+library(corrplot)
+library(naniar)
+library(tidyverse)
+library(tidyr)
+library(caret)
+library(data.table)
+library(knitr)
+library(lubridate)
+
+# Downloading heart csv from github.
+dl <- tempfile()
+download.file("https://raw.githubusercontent.com/mikemiemczok/HarvardX_Certification_Data_Science_Projects/main/HeartDisease_Capstone_project_Final/heart.csv", dl)
+heart <- read.csv(dl)
+
+```
+
+## Introduction
+
+The dataset used in this analysis is the Heart-Disease dataset provided by following creators:
+
+Hungarian Institute of Cardiology. Budapest: Andras Janosi, M.D.
+University Hospital, Zurich, Switzerland: William Steinbrunn, M.D.
+University Hospital, Basel, Switzerland: Matthias Pfisterer, M.D.
+V.A. Medical Center, Long Beach and Cleveland Clinic Foundation: Robert Detrano, M.D., Ph.D.
+Donor:
+David W. Aha (aha '@' ics.uci.edu) (714) 856-8779
+
+and reachable under following web adress: "https://www.kaggle.com/ronitf/heart-disease-uci".
+
+The main goal of this project it is to predict heart disease by the given attributes of the dataset.
+More informations to the dataset will be given in the analysis section.
+
+To achieve this goal the project was built up in following steps:
+
+1. Exploring the dataset.
+2. Data preprocessing.
+3. Visualization of data.
+4. Testing multiple models to get the best three performing.
+5. Optimize the three given models by tuning parameters and correlations.
+6. Present the results.
+\newpage
+
+## Analysis
+
+### Data exploration
+
+In the first step it is helpful to check the raw dataset and get comfortable with it before starting any analysis.
+We started with getting an overview of the structure of the dataset:
+```{r, echo=FALSE, warning=FALSE, message = FALSE}
+# Getting an overview over the structure of the dataset
+str(heart)
+```
+
+Followed by getting an overview over the number of columns and rows:
+```{r, echo=FALSE, warning=FALSE, message = FALSE}
+# Number of columns and rows.
+ncol(heart)
+nrow(heart)
+```
+
+\newpage
+
+As we can see the dataset contains only numerical data. 
+So it's useful to understand the meaning of the numercial numbers for each column:
+
+```{r, echo=FALSE, warning=FALSE, message = FALSE}
+
+columns <- data_frame(Column = "Age", Meaning = "Age in years", Values = "29 - 77")
+columns <- bind_rows(columns, data_frame(Column = "Sex", Meaning = "Gender of the patient", Values = "0: Female; 1: Male"))
+columns <- bind_rows(columns, data_frame(Column = "Cp", Meaning = "Chest Pain Type", Values = "0: asymptomatic; 1: atypical angina; 2: non-anginal pain; 3: typical angina"))
+columns <- bind_rows(columns, data_frame(Column = "Trestbps", Meaning = "Resting Bloog Pressure in mm Hg", Values = "94 - 200"))
+columns <- bind_rows(columns, data_frame(Column = "Chol", Meaning = "Serum Cholosterol in mg/dl", Values = "126 - 564"))
+columns <- bind_rows(columns, data_frame(Column = "Fbs", Meaning = "Fasting Blood Sugar > 120 mg/dl", Values = "0: False; 1: True"))
+columns <- bind_rows(columns, data_frame(Column = "Restecg", Meaning = "Resting Electrocardiographic Results", Values = "Value 0: showing probable or definite left ventricular hypertrophy; 1: normal; 2: having ST-T wave abnormality"))
+columns <- bind_rows(columns, data_frame(Column = "Thalach", Meaning = "Maximum Heart Rate Achieved", Values = "71 - 202"))
+columns <- bind_rows(columns, data_frame(Column = "Exang", Meaning = "Exercise Induced Angina", Values = "0: No; 1: Yes"))
+columns <- bind_rows(columns, data_frame(Column = "Oldpeak", Meaning = "ST depression induced by exercise relative to rest", Values = "0 - 6.2"))
+columns <- bind_rows(columns, data_frame(Column = "Slope", Meaning = "Slope of the peak exercise ST segment", Values = "0: Downsloping; 1: Flat; 2: Upsloping"))
+columns <- bind_rows(columns, data_frame(Column = "Ca", Meaning = "number of major vessels (0-3) colored by flourosopy", Values = "0 - 3"))
+columns <- bind_rows(columns, data_frame(Column = "Thal", Meaning = "Thallium Stress Test", Values = "1: fixed defect; 2: normal; 3: reversible defect"))
+columns <- bind_rows(columns, data_frame(Column = "Target", Meaning = "Heart Disease present", Values = "0: heart disease; 1: no heart disease"))
+columns %>% knitr::kable()
+
+```
+
+\newpage
+
+### Preprocessing
+
+Before we start to get an better insight in the dataset we need to make sure the dataset doesn't contains any missing values like N/As:
+
+```{r, echo=FALSE, warning=FALSE}
+# Checking the dataset for N/As
+sapply(heart, function(x){
+  sum(is.na(x))
+})
+```
+
+Also we need to make sure that the dataset is balanced. That means that there is a good balance between patients who have a heart disease and those who don't.
+
+```{r, echo=FALSE, warning=FALSE}
+table(heart$target)
+```
+
+We see, that we have 138 records of patients who do have a heart disease and 165 records of patients who don't.
+All in all we have a balanced datset so we don't need to use any balancing techniques.
+
+It makes also sense for following visualizations to translate the numerical number of gender into human readable -> 1 = Male and 0 = Female.
+
+```{r, echo=FALSE, warning=FALSE}
+# Preparing the dataset for visualization. Changing the numerical values of sex into human readable.
+head(heart$sex)
+```
+```{r, echo=FALSE, warning=FALSE}
+# Preparing the dataset for visualization. Changing the numerical values of sex into human readable.
+heart_visual <- heart %>% mutate(sex = ifelse(sex == 1, "Male", "Female"))
+head(heart_visual$sex)
+```
+
+\newpage
+
+### Visualization
+
+To get more insight into the data we start with some visualization.
+
+The first visualization shows the general distribution of gender in the heart disease dataset.
+
+```{r, echo=FALSE, warning=FALSE}
+# Starting with some visualization to get an overview of the observations.
+heart_visual %>% 
+  group_by(sex) %>%
+  summarise(count = n()) %>%
+  ggplot(aes(sex, count, fill = sex)) +
+  geom_col() +
+  geom_text(aes(label = count, x = sex, y = count), size = 5, colour = "White", vjust = 1.5) +
+  labs(title = "General distribution of gender",
+       x = "Gender",
+       y = "Prevelance")
+```
+
+We see that we have twice as much males in the dataset as we have females.
+
+\newpage
+
+It makes also sense to get an overview over the distribution of diseases by gender.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# 0 -> Heart Disease. 1 -> no heart disease.
+heart_visual %>% 
+  group_by( target, sex) %>%
+  summarise(count = n()) %>%
+  ggplot(aes(ifelse(target == 0, "Disease", "No disease"), count, fill = sex)) +
+  geom_col() +
+  labs(title = "Distribution of gender having the disease and being healthy",
+       x = "Disease",
+       y = "Prevelance")
+```
+
+If we remember the balance section we already know that we have 138 records with disease and 165 without disease.
+In this visualization we see that of the 138 records with heart disease men tend to be more likely to have a heart disease than women.
+The bar showing without disease is relatively balanced between men and women.
+
+\newpage
+
+With the next graph we are going to examine how the different types of chest pains correspond to the chance of having a heart disease.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# CP = Chest Pain (0: typical angina; 1: atypical angina; 2: non-anginal pain; 3: asymptomatic)
+heart_visual %>% 
+  group_by(cp, target) %>%
+  summarise(count = n()) %>%
+  ggplot(aes(cp, count, fill = factor(target))) +
+  geom_col() +
+  labs(title = "Distribution of chest pain types having the disease and being healthy",
+       x = "Chest Pain Type",
+       y = "Prevelance", fill = "Disease")
+```
+
+We would expect more heart disease cases in category 1 (atypical angina) and 3 (typical angina) or maybe even 2 (non-anginal pain), but contradicting to our expectations most cases of heart disease occur in category 0 (asymptomatic). So if a patient experiences chest pain it is not necessarily an indicator for a heart disease.
+
+\newpage
+
+As next we will inspect the impact of Thalium stress test result which is categorized in three sections:
+
+1: fixed defect
+
+2: normal
+
+3: reversable defect
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Thalium Stress Test Result (1 = fixed defect; 2 = normal; 3 = reversable defect)
+heart_visual %>% 
+  filter(thal != 0) %>%
+  group_by(thal, target) %>%
+  summarise(count = n()) %>%
+  ggplot(aes(thal, count, fill = factor(target))) +
+  geom_col() +
+  labs(title = "Distribution of thalium stress test result having the disease and being healthy",
+       x = "Thalium Stress Test Result",
+       y = "Prevelance", fill = "Disease")
+```
+
+We can see that the normal type (2) includes much fewer heart disease patients than the two other types 1 and 3.
+
+\newpage
+
+The next column we will check is exang. That means will check the impact of exercises induced angina on heart disease:
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Exercise Induced Angina (0 = no; 1 = yes)
+
+heart_visual %>% 
+  group_by(exang, target) %>%
+  summarise(count = n()) %>%
+  ggplot(aes(factor(exang), count, fill = factor(target))) +
+  geom_col() +
+  labs(title = "Distribution of exercise induced angina having the disease and being healthy",
+       x = "Exercise Induced Angina",
+       y = "Prevelance", fill = "Disease")
+```
+
+We can see that patients with an exercise induced angina were much more likely to have a heart disease.
+
+\newpage
+
+We will also check the impact of fasting blood sugar on heart disease:
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Fasting Blood Sugar > 120 mg/dl (0 = no; 1 = yes)
+heart_visual %>% 
+  group_by(fbs, target) %>%
+  summarise(count = n()) %>%
+  ggplot(aes(fbs, count, fill = factor(target))) +
+  geom_col() +
+  labs(title = "Distribution of high fasting blood sugar having the disease and being healthy",
+       x = "Fasting Blood Sugar > 120mg/dl",
+       y = "Prevelance", fill = "Disease")
+```
+
+As we can see the impact of fasting blood sugar has nearly no impact because the bars are balanced whether the fasting blood sugar is low or high.
+
+\newpage
+
+In this visualization we inspect the impact of the age on heart disease.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Inspecting the Age Effect on Heart Disease
+heart_visual %>% 
+  group_by(ï..age, target) %>%
+  summarise(count = n()) %>%
+  ggplot(aes(ï..age, count , fill = factor(target), colour = factor(target))) +
+  geom_col() +
+  labs(title = "General distribution of the age having a heart disease or not",
+       x = "Age",
+       y = "Prevelance", fill = "Disease", colour = "Disease")
+```
+
+As expected higher ages had more heart disease cases than the lower ages. 
+Especially in the range between 50 and 70 years we see increased spikes of heart disease cases.
+
+\newpage
+
+### Model selection
+
+In the next step we need to prepare the dataset for the machine learning algorithms and choose the right model.
+We will split the heart dataset into a 80 / 20 set.
+That means we will use 80% of the data to train our models and 20% to validate it after we have a final model.
+We will also split the train dataset into a 80 / 20 split to test our models without using the validation set.
+
+```{r, echo=FALSE, warning=FALSE}
+# Changing the dataset heart_visual to the dataset heart, because it's better to building models with numerical values.
+# Building the datasets to train and validate with.
+set.seed(1, sample.kind="Rounding") # if using R 3.5 or earlier, use `set.seed(1)`
+test_index <- createDataPartition(y = heart$target, times = 1, p = 0.2, list = FALSE)
+work_with <- heart[-test_index,]
+validate_with <- heart[test_index,]
+
+# Splitting the Train set into a train/test set.
+set.seed(1, sample.kind="Rounding")
+test_index <- createDataPartition(y = work_with$target, times = 1, p = 0.2, list = FALSE)
+train_set <- work_with[-test_index,]
+test_set <- work_with[test_index,]
+```
+
+I choose the seven following models to test how they perform native on the dataset:
+
+```{r, warning=FALSE}
+models <- c("glm", "lda", "rpart", "naive_bayes", "svmLinear", "knn", "rf")
+```
+
+**GLM** - Generalized liner model
+
+**LDA** - Linear discriminant analysis
+
+**RPART** - Classification and Regression Trees
+
+**Naive_Bayes** - Naive bayes
+
+**svmLinear** - Suport Vector Machine with a linear kernel
+
+**knn** - K-Nearest-Neighbor
+
+**rf** - Random Forest
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+fits <- lapply(models, function(model){ 
+  print(model)
+  train(factor(target) ~ ., method = model, data = train_set)
+}) 
+
+names(fits) <- models
+
+glm_results <- confusionMatrix(predict(fits$glm, test_set), factor(test_set$target))$overall["Accuracy"]
+model_results <- data_frame(Variables = "GLM in general", Accuracy = glm_results)
+
+lda_results <- confusionMatrix(predict(fits$lda, test_set), factor(test_set$target))$overall["Accuracy"]
+model_results <- bind_rows(model_results, data_frame(Variables = "LDA in general", Accuracy = lda_results))
+
+rpart_results <- confusionMatrix(predict(fits$rpart, test_set), factor(test_set$target))$overall["Accuracy"]
+model_results <- bind_rows(model_results, data_frame(Variables = "RPART in general", Accuracy = rpart_results))
+
+nb_results <- confusionMatrix(predict(fits$naive_bayes, test_set), factor(test_set$target))$overall["Accuracy"]
+model_results <- bind_rows(model_results, data_frame(Variables = "Naive bayes in general", Accuracy = nb_results))
+
+svm_results <- confusionMatrix(predict(fits$svmLinear, test_set), factor(test_set$target))$overall["Accuracy"]
+model_results <- bind_rows(model_results, data_frame(Variables = "SVM in general", Accuracy = svm_results))
+
+knn_results <- confusionMatrix(predict(fits$knn, test_set), factor(test_set$target))$overall["Accuracy"]
+model_results <- bind_rows(model_results, data_frame(Variables = "KNN in general", Accuracy = knn_results))
+
+rf_results <- confusionMatrix(predict(fits$rf, test_set), factor(test_set$target))$overall["Accuracy"]
+model_results <- bind_rows(model_results, data_frame(Variables = "RF in general", Accuracy = rf_results))
+
+model_results %>% knitr::kable()
+
+
+```
+
+Based on the results I decided to take those models: naive_bayes, rf and GLM.
+
+In the next step it is necessary to optimize all three selected models. 
+That means finding good values for every models tuning parameters.
+The tuning parameters needs to get optimized to get the best performing model results.
+
+We will start first with the naive bayes model. 
+The basic idea of this model is to predict heart disease using conditional probability.
+In this model we need to tune the parameters usekernel, laplace and adjust.
+The arguments are good for:
+
+**laplace**: gives the amount of laplace smoothing. That means that it handles the problem of zero probaility in naive bayes.
+
+**usekernel**: Allows to use kernel density estimation for numeric values instead of gaussian distribution.
+
+**adjust**: Allows to adjust the flexibility of the kernel density estimate.
+
+To get the best parameters we have to use them in combination to get the best value combination of the parameters.
+
+```{r, echo=FALSE, warning=FALSE}
+
+lap <- seq(0, 6, 0.5)
+adj <- seq(1,7, 0.5)
+  
+train_nb2 <- sapply(lap, function(l){
+  train <- train(factor(target) ~ .,
+                    method = "naive_bayes",
+                    tuneGrid = data.frame(usekernel = TRUE, laplace = l, adjust = adj),
+                    data = train_set)
+  train$results
+})
+
+accuracy_nb <- sapply(seq(1, 13, 1), function(i){
+  max(train_nb2["Accuracy",i]$Accuracy)
+})
+
+laplace_nb <- sapply(seq(1, 13, 1), function(i){
+  train_nb2["laplace",i]$laplace[which.max(train_nb2["Accuracy",i]$Accuracy)]
+})
+
+adjust_nb <- sapply(seq(1, 13, 1), function(i){
+  train_nb2["adjust",i]$adjust[which.max(train_nb2["Accuracy",i]$Accuracy)]
+})
+
+# Visualizing the accuracy depending laplace and adjust.
+df_nb <- data.frame(Accuracy = accuracy_nb, Laplace = laplace_nb, Adjust = adjust_nb)
+df_nb %>% ggplot(aes(Laplace, Accuracy, colour = factor(Adjust))) + geom_point()
+# The visualization shows us that the best tuning parameters for adjust and lapace are: laplace = 3.5 and adjust = 2.5
+
+```
+
+As we can see the best parameter combination is: 
+
+**adjust**: 2.5 and **laplace**: 3.5
+
+So lets fit the naive bayes model with the optimized parameters again.
+
+```{r, echo=FALSE, warning=FALSE}
+
+# Fitting the optimzed naive bayes model and prediciting.
+train_nb <- train(factor(target) ~ .,
+                  method = "naive_bayes",
+                  tuneGrid = data.frame(usekernel = TRUE, laplace = 3.5, adjust = 2.5),
+                  data = train_set)
+
+nb_results_after_optimization <- confusionMatrix(predict(train_nb, test_set), factor(test_set$target))$overall["Accuracy"]
+optimized_model_results <- data_frame(Variables = "Naive Bayes after optimization", Accuracy = nb_results_after_optimization)
+optimized_model_results %>% knitr::kable()
+
+```
+
+\newpage
+
+The next model we need to optimize is the random forest model.
+
+The basic idea of the random forest model it is to build multiple decision trees which all use different predictors. 
+They don't use the entire dataset but only different parts of it for each decision tree.
+In this model we need to tune the parameter mtry.
+The parameter mtry means how many splitcandidates are looked at at each decision tree.
+
+```{r, echo=FALSE, warning=FALSE}
+
+# Random Forest
+train_rf2 <- train(factor(target) ~ .,
+                 method = "rf",
+                 tuneGrid = data.frame(mtry = seq(1, 5, 0.5)),
+                 data = train_set)
+
+# Visualizing parameter mtry against the accuracy to get the best mtry value.
+plot(train_rf2)
+
+```
+
+As we can see the best parameter is: 
+
+**mtry**: 1
+
+So lets fit the random forest model with the optimized parameters again:
+
+```{r, echo=FALSE, warning=FALSE}
+
+# Fitting and deploying the optimized rf model.
+train_rf <- train(factor(target) ~ .,
+                  method = "rf",
+                  tuneGrid = data.frame(mtry = 1),
+                  data = train_set)
+
+rf_results_after_optimization <- confusionMatrix(predict(train_rf, test_set), factor(test_set$target))$overall["Accuracy"]
+optimized_model_results <- bind_rows(optimized_model_results, data_frame(Variables = "Random forest after optimization", Accuracy = rf_results_after_optimization))
+optimized_model_results %>% knitr::kable()
+
+```
+
+\newpage
+
+The next model is the generalized linear model. This model doesn't have any parameters to tune with the train function.
+The basic idea of the generalized linear model it is to predict values along a linear regression line.
+
+```{r, echo=FALSE, warning=FALSE}
+
+# Generalized Logistic Regression
+train_glm <- train(factor(target) ~ .,
+                   method = "glm",
+                   data = train_set)
+glm_results_after_optimization <- confusionMatrix(predict(train_glm, test_set), factor(test_set$target))$overall["Accuracy"]
+optimized_model_results <- bind_rows(optimized_model_results, data_frame(Variables = "GLM after optimization", Accuracy = glm_results_after_optimization))
+
+optimized_model_results %>% knitr::kable()
+
+```
+
+\newpage
+
+Another aspect to optimize the model is to check existing correlations and delete those columns not correlating with the target (heart disease) implying those columns do not add any valuable information to the model.
+
+```{r, echo=FALSE, warning=FALSE}
+correlations <- cor(heart)
+corrplot(correlations, "number")
+```
+
+As we can see there are few cloumns (fbs, chol, trestbps and restecg) that do not correlate with the target (heart disease).
+
+In the next step we will delete those columns to see if this improves the models.
+We will also check the ensemble method where we use the three improved models to gather a majority vote on the target value (heart disease).
+
+```{r, echo=FALSE, warning=FALSE}
+# As we can see in the graphic there are 4 columns with a correlation under 0.15.
+# Assuming that this columns haven't any positive impact on the model we a are deleting them to get a better result.
+train_set$chol <- NULL
+train_set$fbs <- NULL
+train_set$trestbps <- NULL
+train_set$restecg <- NULL
+
+# Deploying the three models again.
+train_nb <- train(factor(target) ~ .,
+                  method = "naive_bayes",
+                  tuneGrid = data.frame(usekernel = TRUE, laplace = 0.5, adjust = 2.5),
+                  data = train_set)
+nb_optimized_corr <- confusionMatrix(predict(train_nb, test_set), factor(test_set$target))$overall["Accuracy"]
+corr_optimized_model_results <- data_frame(Variables = "Naive Bayes after optimization - correlation", Accuracy = nb_optimized_corr)
+
+
+# Random Forest
+train_rf <- train(factor(target) ~ .,
+                  method = "rf",
+                  tuneGrid = data.frame(mtry = 2),
+                  data = train_set)
+rf_optimized_corr <- confusionMatrix(predict(train_rf, test_set), factor(test_set$target))$overall["Accuracy"]
+corr_optimized_model_results <- bind_rows(corr_optimized_model_results, data_frame(Variables = "Random Forest after optimization - correlation", Accuracy = rf_optimized_corr))
+
+# Generalized Logistic Regression
+train_glm <- train(factor(target) ~ .,
+                   method = "glm",
+                   data = train_set)
+glm_optimized_corr <- confusionMatrix(predict(train_glm, test_set), factor(test_set$target))$overall["Accuracy"]
+corr_optimized_model_results <- bind_rows(corr_optimized_model_results, data_frame(Variables = "GLM after optimization - correlation", Accuracy = glm_optimized_corr))
+
+# Trying to use ensemble to get the best out of all models.
+p_nb <- predict(train_nb, test_set)
+p_rf <- predict(train_rf, test_set)
+p_glm <- predict(train_glm, test_set)
+p <- as.numeric(p_nb) + as.numeric(p_rf) + as.numeric(p_glm)
+y_pred <- factor(ifelse(p > 4, 1, 0))
+
+ensemble_optimized_corr <- confusionMatrix(y_pred, factor(test_set$target))$overall["Accuracy"]
+corr_optimized_model_results <- bind_rows(corr_optimized_model_results, data_frame(Variables = "Ensemble", Accuracy = ensemble_optimized_corr))
+
+corr_optimized_model_results %>% knitr::kable()
+```
+
+Based on the Accuracy the Naive bayes model is the best performing model to predict heart disease.
+
+\newpage
+
+## Results
+
+We saw already in analysis section that the Naive bayes model is the best performing model.
+To get the the final results we need to deploy the algorithm on the validation dataset.
+
+```{r, echo=FALSE, warning=FALSE}
+
+# Deleting columns with nearly zero correlation.
+validate_with$chol <- NULL
+validate_with$fbs <- NULL
+validate_with$trestbps <- NULL
+validate_with$restecg <- NULL
+
+# Building the final model - naive bayes - on the validation dataset.
+# Naive bayes
+final_nb <- confusionMatrix(predict(train_nb, validate_with), factor(validate_with$target))$overall["Accuracy"]
+final_model_results <- data_frame(Variables = "Naive Bayes - final model", Accuracy = final_nb)
+final_model_results %>% knitr::kable()
+
+```
+
+The final accuracy is 0.852459.
+
+\newpage
+
+## Conclusion
+
+As we can see our final model has a decent accuracy to predict heart disease in patients. Although the model would be more stable and better at predicting with more data in the dataset. 
+Also while the Accuracy is decent our sensitivity to find the a heart disease is just okay.
+
+As we saw in the graphs above some predictors do not really have an impact on the outcome, meaning the patient has a heart disease. One of these is the column fbs - Fasting Blood Sugar. 
+Other columns, like exercise induced angina, increased the risk for having a heart disease substantially.
+
+Feel free to network with me on LinkedIn: https://www.linkedin.com/in/mike-miemczok-432206209/ 
+
+or Xing: https://www.xing.com/profile/Mike_Miemczok
+
+Also check out my github for future work: https://github.com/mikemiemczok
